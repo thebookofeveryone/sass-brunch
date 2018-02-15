@@ -73,7 +73,7 @@ class SassCompiler {
           result.css.toString().replace('/*# sourceMappingURL=a.css.map */', '');
 
         const map =
-          JSON.parse(result.map.toString());
+          result.map.toString();
 
         resolve({data, map});
       });
