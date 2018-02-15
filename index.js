@@ -97,46 +97,8 @@ class SassCompiler {
       this.includePaths = this.config.options.includePaths;
     }
 
-    /* eslint-disable camelcase */
-    this.gem_home = this.config.gem_home;
     this.env = {};
-    if (this.gem_home) {
-      const env = Object.assign({}, process.env);
-      env.GEM_HOME = this.gem_home;
-      this.env = {env};
-      this._bin = `${this.gem_home}/bin/${this._bin}`;
-      this._compass_bin = `${this.gem_home}/bin/${this._compass_bin}`;
-    }
-    /* eslint-enable camelcase */
-
-    this.bundler = this.config.useBundler;
-    this.prefix = this.bundler ? 'bundle exec ' : '';
-  }
-
-  _checkRuby() {
-    const prefix = this.prefix;
-    const env = this.env;
-    const sassCmd = `${prefix}${this._bin} --version`;
-    const compassCmd = `${prefix}${this._compass_bin} --version`;
-
-    const sassPromise = new Promise((resolve, reject) => {
-      exec(sassCmd, env, error => {
-        if (error) {
-          console.error('You need to have Sass on your system');
-          console.error('Execute `gem install sass`');
-          reject();
-        } else {
-          resolve();
-        }
-      });
-    });
-    const compassPromise = new Promise(resolve => {
-      exec(compassCmd, env, error => {
-        this.compass = !error;
-        resolve();
-      });
-    });
-    this.rubyPromise = Promise.all([sassPromise, compassPromise]);
+    this.prefix = '';
   }
 
   _getIncludePaths(path) {
@@ -177,40 +139,6 @@ class SassCompiler {
     });
   }
 
-  _rubyCompile(source) {
-    if (this.rubyPromise == null) this._checkRuby();
-    let cmd = [this._bin, '--stdin'];
-
-    const includePaths = this._getIncludePaths(source.path);
-    includePaths.forEach(path => {
-      cmd.push('--load-path');
-      cmd.push(path);
-    });
-    if (!this.config.allowCache) cmd.push('--no-cache');
-
-    if (this.bundler) cmd.unshift('bundle', 'exec');
-
-    return this.rubyPromise.then(() => {
-      var debugMode = this.config.debug, hasComments;
-      if ((debugMode === 'comments' || debugMode === 'debug') && !this.optimize) {
-        hasComments = this.config.debug === 'comments';
-        cmd.push(hasComments ? '--line-comments' : '--debug-info');
-      }
-
-      if (this.config.precision) cmd.push(`--precision=${this.config.precision}`);
-      if (!sassRe.test(source.path)) cmd.push('--scss');
-      if (source.compass && this.compass) cmd.push('--compass');
-      if (this.config.options != null) cmd.push.apply(cmd, this.config.options);
-
-      if (isWindows) {
-        cmd = ['cmd', '/c', `"${cmd[0]}"`].concat(cmd.slice(1));
-        this.env.windowsVerbatimArguments = true;
-      }
-
-      return promiseSpawnAndPipe(cmd[0], cmd.slice(1), this.env, source.data).then(data => ({data}));
-    });
-  }
-
   get getDependencies() {
     return progeny({
       rootPath: this.rootPath,
@@ -220,14 +148,6 @@ class SassCompiler {
     });
   }
 
-  get seekCompass() {
-    return promisify(progeny({
-      rootPath: this.rootPath,
-      exclusion: '',
-      potentialDeps: true,
-    }));
-  }
-
   compile(params) {
     const data = params.data;
     const path = params.path;
@@ -235,25 +155,18 @@ class SassCompiler {
     // skip empty source files
     if (!data.trim().length) return Promise.resolve({data: ''});
 
-    return this.seekCompass(path, data).then(imports => {
-      const source = {
-        data,
-        path,
-        compass: imports.some(depPath => compassRe.test(depPath)),
-      };
+    const source = {
+      data,
+      path
+    };
 
-      const fileUsesRuby = sassRe.test(path) || source.compass;
-
-      if (this.mode === 'ruby' || this.mode !== 'native' && fileUsesRuby) {
-        return this._rubyCompile(source);
-      }
-
-      return this._nativeCompile(source);
-    }).then(params => {
+    this._nativeCompile(source).then(params => {
       if (this.modules && !this.isIgnored(path)) {
         const moduleOptions = this.modules === true ? {} : this.modules;
         return cssModulify(path, params.data, params.map, moduleOptions);
       }
+
+      console.log(source.path);
 
       return params;
     });
